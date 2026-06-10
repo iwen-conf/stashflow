@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Local subscription files may contain proxy credentials or subscription URLs.
+*.yaml
+*.yml
+*.yaml.bak*
+*.yml.bak*
+
+!.github/**/*.yml
+!.github/**/*.yaml
