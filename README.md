@@ -89,6 +89,10 @@ stashflow-clean --fix-all --no-backup "Starlink.yaml"
 The built-in template creates these policy groups:
 
 - `🛑 广告拦截`
+- `💬 微信`
+- `🐧 腾讯服务`
+- `💰 支付服务`
+- `🇨🇳 国内流量`
 - `🤖 AI服务`
 - `💬 Telegram`
 - `📺 流媒体`
@@ -97,6 +101,12 @@ The built-in template creates these policy groups:
 - `🎮 游戏平台`
 - `🌐 国外流量`
 - `🐟 漏网之鱼`
+
+Domestic rules are intentionally explicit for common Chinese services such as
+WeChat, Tencent, Alipay, UnionPay, Taobao, JD, Meituan, Amap, Bilibili, Douyin,
+Xiaohongshu, Zhihu, Kuaishou, NetEase, Weibo, Xiaomi, Huawei, OPPO, and Vivo.
+These groups default to `DIRECT`, but remain selectable in Stash for unusual
+network conditions.
 
 The rules are local YAML rules, not remote `rule-provider` entries. This keeps
 subscription loading predictable and avoids extra network fetches when importing
