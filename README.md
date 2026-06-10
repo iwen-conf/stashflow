@@ -1,92 +1,87 @@
 # StashFlow
 
-StashFlow is a small terminal UI for maintaining Stash, Clash, and Mihomo
-subscription YAML files after provider updates.
+StashFlow 是一个用 Go 和 Bubble Tea 编写的中文 TUI，用来维护 Stash、Clash、Mihomo 订阅 YAML。
 
-It fixes two common subscription-update problems:
+它解决两个常见问题：
 
-- removes proxy entries whose `uuid` value is not a canonical UUID
-- re-applies a local Stash split-routing template that subscription updates may overwrite
+- 订阅更新后混入 `uuid` 不标准的代理节点
+- 订阅更新后自定义分流策略被覆盖
 
-StashFlow works on local files only. It does not upload your subscription, proxy
-nodes, tokens, or YAML content anywhere.
+StashFlow 只处理本地文件，不上传订阅、节点、Token 或 YAML 内容。
 
-## Install
+## 安装
 
 ```bash
 brew tap iwen-conf/stashflow
 brew install stashflow
 ```
 
-You can also run the scripts directly from this repository:
+如果 Homebrew 开启了 tap trust 检查：
 
 ```bash
-bin/stashflow
-bin/stashflow-clean --fix-all path/to/subscription.yaml
+brew trust iwen-conf/stashflow
 ```
 
-## TUI Usage
+## 使用 TUI
 
-Open the TUI in a directory that contains `.yaml` or `.yml` subscription files:
+在订阅文件所在目录运行：
 
 ```bash
 stashflow
 ```
 
-Or pass specific files:
+也可以指定文件：
 
 ```bash
 stashflow "Starlink.yaml"
 ```
 
-Keys:
+按键：
 
-- `Up/Down` or `j/k`: move selection
-- `Enter`: fix the selected file
-- `A`: fix all files that need work
-- `b`: toggle backup files, enabled by default
-- `r`: rescan files
-- `q`: quit
+- `↑/↓` 或 `j/k`：移动选择
+- `Enter`：修复当前文件
+- `A`：修复所有需要处理的文件
+- `b`：切换是否生成 `.bak` 备份，默认开启
+- `r`：重新扫描
+- `q`：退出
 
-When fixing a file, StashFlow first removes invalid UUID proxy entries and their
-proxy-group references, then re-applies the built-in split-routing groups and
-rules. A `.bak` backup is created before writing unless backup is disabled.
+修复时会先删除异常 UUID 节点和对应策略组引用，再补回内置分流分组和规则。
 
-## CLI Usage
+## 批处理
 
-Preview changes:
+预览：
 
 ```bash
 stashflow-clean --fix-all --dry-run "Starlink.yaml"
 ```
 
-Clean invalid UUID proxies only:
+只清理异常 UUID：
 
 ```bash
 stashflow-clean "Starlink.yaml"
 ```
 
-Clean invalid UUID proxies and re-apply Stash split rules:
+清理异常 UUID 并补回分流规则：
 
 ```bash
 stashflow-clean --fix-all "Starlink.yaml"
 ```
 
-Re-apply only the Stash split rules:
+只补回分流规则：
 
 ```bash
 stashflow-clean --apply-stash-rules "Starlink.yaml"
 ```
 
-Disable backups:
+不创建备份：
 
 ```bash
 stashflow-clean --fix-all --no-backup "Starlink.yaml"
 ```
 
-## Split Routing Template
+## 分流模板
 
-The built-in template creates these policy groups:
+内置策略组：
 
 - `🛑 广告拦截`
 - `💬 微信`
@@ -102,20 +97,17 @@ The built-in template creates these policy groups:
 - `🌐 国外流量`
 - `🐟 漏网之鱼`
 
-Domestic rules are intentionally explicit for common Chinese services such as
-WeChat, Tencent, Alipay, UnionPay, Taobao, JD, Meituan, Amap, Bilibili, Douyin,
-Xiaohongshu, Zhihu, Kuaishou, NetEase, Weibo, Xiaomi, Huawei, OPPO, and Vivo.
-These groups default to `DIRECT`, but remain selectable in Stash for unusual
-network conditions.
+国内规则明确覆盖微信、腾讯、微信支付、支付宝、银联、淘宝、京东、美团、高德、B 站、抖音、小红书、知乎、快手、网易、微博、小米、华为、OPPO、vivo 等常见服务。国内相关分组默认走 `DIRECT`，但在 Stash 里仍可以手动切到代理。
 
-The rules are local YAML rules, not remote `rule-provider` entries. This keeps
-subscription loading predictable and avoids extra network fetches when importing
-the config into Stash.
+规则是本地 YAML 规则，不使用远程 `rule-provider`，导入 Stash 时不需要额外拉取远程规则集。
 
-## Requirements
+## 从源码运行
 
-StashFlow uses only the Python standard library.
+```bash
+go run ./cmd/stashflow
+go run ./cmd/stashflow-clean --fix-all "Starlink.yaml"
+```
 
-## License
+## 许可证
 
 MIT
