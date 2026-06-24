@@ -258,6 +258,9 @@ func TestDownloadSubscriptionWritesQXConfWithoutLeakingQuery(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.UserAgent(); got != "Quantumult X" {
+			t.Fatalf("expected Quantumult X user agent, got %q", got)
+		}
 		fmt.Fprintln(w, "[server_local]")
 		fmt.Fprintln(w, "hysteria2=hy2.example.com:443, password=p, tag=Hy2")
 	}))

@@ -55,6 +55,7 @@ type model struct {
 	scanErr     error
 	urlInput    bool
 	urlText     string
+	urlError    string
 	confirm     confirmKind
 	confirmText string
 }
@@ -153,6 +154,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc":
 				m.urlInput = false
 				m.urlText = ""
+				m.urlError = ""
 				m.message = "已取消输入订阅链接"
 			case "enter":
 				m.submitURLInput()
@@ -163,9 +165,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "ctrl+u":
 				m.urlText = ""
+				m.urlError = ""
 			default:
 				if len(msg.Runes) > 0 {
 					m.urlText += string(msg.Runes)
+					m.urlError = ""
 				}
 			}
 			return m, nil
@@ -190,6 +194,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "u", "U":
 			m.urlInput = true
 			m.urlText = ""
+			m.urlError = ""
 			m.message = "粘贴订阅链接后按 Enter"
 		case "b", "B":
 			m.backup = !m.backup
@@ -271,11 +276,11 @@ func (m model) View() string {
 	b.WriteString(mutedStyle.Render(strings.Repeat("-", max(0, width-1))))
 	b.WriteByte('\n')
 	if m.urlInput {
-		prompt := "订阅链接: " + m.urlText
-		if m.urlText == "" {
-			prompt = "订阅链接: "
+		if m.urlError != "" {
+			b.WriteString(errorStyle.Render(truncate("下载失败: "+m.urlError, max(12, width-1))))
+			b.WriteByte('\n')
 		}
-		b.WriteString(warnStyle.Render(truncate(prompt, max(12, width-28)) + "  Enter 下载，Esc 取消"))
+		b.WriteString(warnStyle.Render(truncate(m.urlPrompt(), max(12, width-26)) + "  Enter 下载，Esc 取消"))
 	} else if m.confirm != confirmNone {
 		b.WriteString(warnStyle.Render(m.confirmText + "  按 y 确认，n 取消"))
 	} else {
@@ -287,29 +292,35 @@ func (m model) View() string {
 func (m *model) submitURLInput() {
 	rawURL := strings.TrimSpace(m.urlText)
 	if rawURL == "" {
-		m.message = "请输入订阅链接"
+		m.urlError = "请输入订阅链接"
 		return
 	}
 	if !stashflow.IsHTTPURL(rawURL) {
-		m.message = "订阅链接必须以 http:// 或 https:// 开头"
+		m.urlError = "订阅链接必须以 http:// 或 https:// 开头"
 		return
 	}
 
 	paths, scanErr := stashflow.ResolveFilesForTarget([]string{rawURL}, "qx")
+	if scanErr != nil {
+		m.urlError = scanErr.Error()
+		return
+	}
+
 	m.args = []string{rawURL}
 	m.paths = paths
-	m.scanErr = scanErr
+	m.scanErr = nil
 	m.target = "qx"
 	m.selected = 0
 	m.offset = 0
 	m.urlInput = false
 	m.urlText = ""
+	m.urlError = ""
 	m.refresh()
-	if scanErr != nil {
-		m.message = scanErr.Error()
-		return
-	}
 	m.message = "已下载订阅并切换到 QX"
+}
+
+func (m model) urlPrompt() string {
+	return "订阅链接: " + m.urlText + "|"
 }
 
 func (m *model) refresh() {

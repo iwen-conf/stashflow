@@ -433,7 +433,7 @@ func DownloadSubscription(rawURL string, target string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "stashflow")
+	req.Header.Set("User-Agent", subscriptionUserAgent(target))
 
 	client := http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -443,7 +443,7 @@ func DownloadSubscription(rawURL string, target string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("下载订阅失败: HTTP %d", resp.StatusCode)
+		return "", fmt.Errorf("HTTP %d，%s", resp.StatusCode, subscriptionHTTPStatusHint(resp.StatusCode))
 	}
 
 	data, err := io.ReadAll(resp.Body)
@@ -459,6 +459,24 @@ func DownloadSubscription(rawURL string, target string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+func subscriptionUserAgent(target string) string {
+	if strings.EqualFold(target, "qx") {
+		return "Quantumult X"
+	}
+	return "Stash"
+}
+
+func subscriptionHTTPStatusHint(statusCode int) string {
+	switch statusCode {
+	case http.StatusForbidden:
+		return "服务端拒绝请求，请检查订阅链接、权限或是否已过期"
+	case http.StatusNotFound:
+		return "订阅地址不存在，请检查链接是否完整"
+	default:
+		return "订阅服务返回非成功状态"
+	}
 }
 
 func SubscriptionDownloadPath(rawURL string, target string) string {
