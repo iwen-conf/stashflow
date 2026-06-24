@@ -53,6 +53,8 @@ type model struct {
 	backup      bool
 	message     string
 	scanErr     error
+	urlInput    bool
+	urlText     string
 	confirm     confirmKind
 	confirmText string
 }
@@ -111,7 +113,7 @@ func main() {
 func printUsage() {
 	fmt.Fprintf(os.Stdout, "用法: %s [配置文件 ...]\n\n", filepath.Base(os.Args[0]))
 	fmt.Fprintln(os.Stdout, "中文 TUI，用于清理 Stash 异常 UUID 或 QX 不支持的 hy2 节点，并补回分流规则。")
-	fmt.Fprintln(os.Stdout, "运行后在界面内按 t 切换 Stash/QX，按 Enter 或 A 保存。")
+	fmt.Fprintln(os.Stdout, "运行后在界面内按 t 切换 Stash/QX，按 u 输入订阅链接，按 Enter 或 A 保存。")
 }
 
 func (m model) Init() tea.Cmd {
@@ -144,6 +146,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		if m.urlInput {
+			switch key {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc":
+				m.urlInput = false
+				m.urlText = ""
+				m.message = "已取消输入订阅链接"
+			case "enter":
+				m.submitURLInput()
+			case "backspace", "ctrl+h":
+				runes := []rune(m.urlText)
+				if len(runes) > 0 {
+					m.urlText = string(runes[:len(runes)-1])
+				}
+			case "ctrl+u":
+				m.urlText = ""
+			default:
+				if len(msg.Runes) > 0 {
+					m.urlText += string(msg.Runes)
+				}
+			}
+			return m, nil
+		}
+
 		switch key {
 		case "ctrl+c", "q", "Q":
 			return m, tea.Quit
@@ -160,6 +187,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = "已重新扫描"
 		case "t", "T":
 			m.switchTarget()
+		case "u", "U":
+			m.urlInput = true
+			m.urlText = ""
+			m.message = "粘贴订阅链接后按 Enter"
 		case "b", "B":
 			m.backup = !m.backup
 			if m.backup {
@@ -216,7 +247,7 @@ func (m model) View() string {
 	b.WriteByte('\n')
 	b.WriteString(mutedStyle.Render(fmt.Sprintf("目标: %s | 文件: %d | %s: %d | 待补分流: %d | 引用: %d | 备份: %s", m.targetDisplayName(), len(m.targets), m.issueLabel(), totalBad, totalSplit, totalRefs, backupText)))
 	b.WriteByte('\n')
-	b.WriteString(mutedStyle.Render("↑/↓/j/k 选择 · t 切换 Stash/QX · Enter 保存当前 · A 保存全部 · b 切换备份 · r 重新扫描 · q 退出"))
+	b.WriteString(mutedStyle.Render("↑/↓/j/k 选择 · t 切换 Stash/QX · u 输入订阅链接 · Enter 保存当前 · A 保存全部 · b 切换备份 · r 重新扫描 · q 退出"))
 	b.WriteString("\n\n")
 
 	listWidth := width / 2
@@ -239,12 +270,46 @@ func (m model) View() string {
 	b.WriteByte('\n')
 	b.WriteString(mutedStyle.Render(strings.Repeat("-", max(0, width-1))))
 	b.WriteByte('\n')
-	if m.confirm != confirmNone {
+	if m.urlInput {
+		prompt := "订阅链接: " + m.urlText
+		if m.urlText == "" {
+			prompt = "订阅链接: "
+		}
+		b.WriteString(warnStyle.Render(truncate(prompt, max(12, width-28)) + "  Enter 下载，Esc 取消"))
+	} else if m.confirm != confirmNone {
 		b.WriteString(warnStyle.Render(m.confirmText + "  按 y 确认，n 取消"))
 	} else {
 		b.WriteString(mutedStyle.Render(m.message))
 	}
 	return b.String()
+}
+
+func (m *model) submitURLInput() {
+	rawURL := strings.TrimSpace(m.urlText)
+	if rawURL == "" {
+		m.message = "请输入订阅链接"
+		return
+	}
+	if !stashflow.IsHTTPURL(rawURL) {
+		m.message = "订阅链接必须以 http:// 或 https:// 开头"
+		return
+	}
+
+	paths, scanErr := stashflow.ResolveFilesForTarget([]string{rawURL}, "qx")
+	m.args = []string{rawURL}
+	m.paths = paths
+	m.scanErr = scanErr
+	m.target = "qx"
+	m.selected = 0
+	m.offset = 0
+	m.urlInput = false
+	m.urlText = ""
+	m.refresh()
+	if scanErr != nil {
+		m.message = scanErr.Error()
+		return
+	}
+	m.message = "已下载订阅并切换到 QX"
 }
 
 func (m *model) refresh() {

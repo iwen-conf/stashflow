@@ -46,7 +46,7 @@ stashflow "https://example.com/v1/subscribe?token=..."
 
 URL 输入会默认进入 QX 模式，先在当前目录保存一份本地 `.conf`，再生成同名 `-QX.yaml` 输出。文件名不会包含 URL query 里的订阅 Token。
 
-运行 `stashflow` 后在 TUI 内按 `t` 在 Stash/QX 之间切换；切到 QX 后会重新扫描当前目录的 `.conf` 文件。
+运行 `stashflow` 后也可以在 TUI 内按 `u` 输入或粘贴订阅 URL；按 `Enter` 下载后会自动切到 QX 模式。按 `t` 可在 Stash/QX 之间切换；切到 QX 后会重新扫描当前目录的 `.conf` 文件。
 
 QX 模式不会覆盖源文件，会保存为同目录下的 `源文件名-QX.yaml`，例如 `Starlink.conf` 会输出 `Starlink-QX.yaml`。如果同名输出文件已存在且备份开启，会先备份旧输出文件。
 
@@ -58,6 +58,7 @@ QX 输出会自动加入懒猫微服打洞优化：`*.heiyu.space`、`*.lazycat.
 
 - `↑/↓` 或 `j/k`：移动选择
 - `t`：切换 Stash/QX 目标并重新扫描
+- `u`：输入订阅链接并按 `Enter` 下载到 QX 模式
 - `Enter`：保存当前文件的修复
 - `A`：保存所有需要处理的文件
 - `b`：切换是否生成 `.bak` 备份，默认开启
