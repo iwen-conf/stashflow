@@ -10,7 +10,3 @@ __pycache__/
 
 !.github/**/*.yml
 !.github/**/*.yaml
-
-# Cloudflare/Rust build outputs.
-cloudflare/**/target/
-cloudflare/**/build/
