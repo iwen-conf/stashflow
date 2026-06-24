@@ -189,6 +189,7 @@ func ApplyQXSplitRules(text string) SplitResult {
 		names[name] = true
 	}
 
+	lines = upsertQXGeneralLazycatSettings(lines)
 	lines = upsertQXPolicyLines(lines, names)
 	lines = replaceQXFilterLocal(lines)
 
@@ -749,6 +750,79 @@ func upsertQXPolicyLines(lines []string, names map[string]bool) []string {
 	result = append(result, section...)
 	result = append(result, lines[end:]...)
 	return result
+}
+
+func upsertQXGeneralLazycatSettings(lines []string) []string {
+	start, end, ok := qxSectionBounds(lines, "general")
+	if !ok {
+		insert := []string{
+			"[general]",
+			"dns_exclusion_list = " + strings.Join(QXLazycatDNSExclusionValues, ", "),
+			"excluded_routes = " + strings.Join(QXLazycatExcludedRouteValues, ", "),
+			"",
+		}
+		return insertLines(lines, 0, insert)
+	}
+
+	section := append([]string{}, lines[start:end]...)
+	section = upsertQXListSetting(section, "dns_exclusion_list", QXLazycatDNSExclusionValues)
+	section = upsertQXListSetting(section, "excluded_routes", QXLazycatExcludedRouteValues)
+
+	result := make([]string, 0, len(lines)-end+start+len(section))
+	result = append(result, lines[:start]...)
+	result = append(result, section...)
+	result = append(result, lines[end:]...)
+	return result
+}
+
+func upsertQXListSetting(section []string, key string, values []string) []string {
+	for i := 1; i < len(section); i++ {
+		line := section[i]
+		trimmed := strings.TrimSpace(stripQXComment(line))
+		if trimmed == "" || !strings.Contains(trimmed, "=") {
+			continue
+		}
+
+		parts := strings.SplitN(trimmed, "=", 2)
+		if !strings.EqualFold(strings.TrimSpace(parts[0]), key) {
+			continue
+		}
+
+		merged := mergeQXListValues(splitQXListValues(parts[1]), values)
+		section[i] = strings.Repeat(" ", leadingSpaces(line)) + key + " = " + strings.Join(merged, ", ")
+		return section
+	}
+
+	return append(section, key+" = "+strings.Join(values, ", "))
+}
+
+func mergeQXListValues(existing []string, values []string) []string {
+	result := append([]string{}, existing...)
+	seen := make(map[string]bool, len(result)+len(values))
+	for _, value := range result {
+		seen[strings.ToLower(value)] = true
+	}
+	for _, value := range values {
+		key := strings.ToLower(value)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+func splitQXListValues(value string) []string {
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			values = append(values, part)
+		}
+	}
+	return values
 }
 
 func qxPolicyNameManaged(line string, names map[string]bool) bool {

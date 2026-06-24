@@ -42,6 +42,8 @@ stashflow "Starlink.yaml"
 
 QX 模式不会覆盖源文件，会保存为同目录下的 `源文件名-QX.yaml`，例如 `Starlink.conf` 会输出 `Starlink-QX.yaml`。如果同名输出文件已存在且备份开启，会先备份旧输出文件。
 
+QX 输出会自动加入懒猫微服打洞优化：`*.heiyu.space`、`*.lazycat.cloud` 使用真实 DNS，`6.6.6.6/32`、`2000::6666/128` 加入 QX `excluded_routes`，并将 `heiyu.space`、`lazycat.cloud` 和 `fc03:1136:3800::/40` 直连，减少 QX TUN 对懒猫直连/穿透逻辑的干扰。
+
 按键：
 
 - `↑/↓` 或 `j/k`：移动选择

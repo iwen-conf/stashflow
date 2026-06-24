@@ -41,9 +41,16 @@ func TestApplyQXSplitRulesAddsPoliciesAndConvertedRules(t *testing.T) {
 	result := ApplyQXSplitRules("[general]\nserver_check_url=http://example.com\n")
 
 	for _, want := range []string{
+		"dns_exclusion_list = *.heiyu.space, *.lazycat.cloud",
+		"excluded_routes = 6.6.6.6/32, 2000::6666/128",
 		"[policy]",
 		"static=🛑 广告拦截, reject, direct, ✨ 星链Starlink",
 		"[filter_local]",
+		"HOST-SUFFIX,heiyu.space,direct",
+		"HOST-SUFFIX,lazycat.cloud,direct",
+		"IP-CIDR,6.6.6.6/32,direct,no-resolve",
+		"IP6-CIDR,2000::6666/128,direct,no-resolve",
+		"IP6-CIDR,fc03:1136:3800::/40,direct,no-resolve",
 		"HOST-SUFFIX,googlesyndication.com,🛑 广告拦截",
 		"IP6-CIDR,fe80::/10,direct",
 		"FINAL,🐟 漏网之鱼",
@@ -60,6 +67,31 @@ func TestApplyQXSplitRulesAddsPoliciesAndConvertedRules(t *testing.T) {
 	}
 	if result.RuleCount != len(QXRuleLines) {
 		t.Fatalf("expected rule count %d, got %d", len(QXRuleLines), result.RuleCount)
+	}
+}
+
+func TestApplyQXSplitRulesMergesLazycatGeneralSettings(t *testing.T) {
+	input := strings.Join([]string{
+		"[general]",
+		"dns_exclusion_list = example.com, *.heiyu.space",
+		"excluded_routes = 10.0.0.0/8",
+		"[filter_local]",
+		"HOST-SUFFIX,old.example,direct",
+		"",
+	}, "\n")
+
+	result := ApplyQXSplitRules(input)
+
+	for _, want := range []string{
+		"dns_exclusion_list = example.com, *.heiyu.space, *.lazycat.cloud",
+		"excluded_routes = 10.0.0.0/8, 6.6.6.6/32, 2000::6666/128",
+	} {
+		if !strings.Contains(result.Text, want) {
+			t.Fatalf("expected QX output to contain %q:\n%s", want, result.Text)
+		}
+	}
+	if strings.Count(result.Text, "*.heiyu.space") != 1 {
+		t.Fatalf("expected heiyu.space DNS exclusion to be deduplicated:\n%s", result.Text)
 	}
 }
 
