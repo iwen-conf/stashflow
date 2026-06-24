@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, for example v0.2.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build archives
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+
+          version="${TAG_NAME#v}"
+          mkdir -p dist
+
+          targets=(
+            "darwin/amd64"
+            "darwin/arm64"
+            "linux/amd64"
+            "linux/arm64"
+            "windows/amd64"
+            "windows/arm64"
+          )
+
+          for target in "${targets[@]}"; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            package_dir="stashflow_${version}_${os}_${arch}"
+            work_dir="dist/${package_dir}"
+            mkdir -p "${work_dir}"
+
+            suffix=""
+            if [ "${os}" = "windows" ]; then
+              suffix=".exe"
+            fi
+
+            GOOS="${os}" GOARCH="${arch}" go build -trimpath -ldflags="-s -w" -o "${work_dir}/stashflow${suffix}" ./cmd/stashflow
+            GOOS="${os}" GOARCH="${arch}" go build -trimpath -ldflags="-s -w" -o "${work_dir}/stashflow-clean${suffix}" ./cmd/stashflow-clean
+            cp README.md LICENSE "${work_dir}/"
+
+            if [ "${os}" = "windows" ]; then
+              (cd dist && zip -qr "${package_dir}.zip" "${package_dir}")
+            else
+              tar -C dist -czf "dist/${package_dir}.tar.gz" "${package_dir}"
+            fi
+
+            rm -rf "${work_dir}"
+          done
+
+          (cd dist && sha256sum * > checksums.txt)
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/*
