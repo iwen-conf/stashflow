@@ -12,6 +12,8 @@ var (
 	uuidPattern      = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	topLevelKey      = regexp.MustCompile(`^[^\s#-][^:]*:\s*`)
 	flowProxyPattern = regexp.MustCompile(`^(?P<prefix>\s*proxies:\s*)\[(?P<body>.*)\](?P<suffix>\s*(?:#.*)?)$`)
+	qxSectionPattern = regexp.MustCompile(`^\s*\[[^\]]+\]\s*(?:[#;].*)?$`)
+	qxTagPattern     = regexp.MustCompile(`(?i)(?:^|,\s*)tag\s*=\s*([^,]+)`)
 )
 
 type Removal struct {
@@ -152,6 +154,114 @@ func AnalyzeFile(path string) (FixResult, error) {
 	return FixText(string(data), true), nil
 }
 
+func CleanQXText(text string) CleanResult {
+	trailingNewline := strings.HasSuffix(text, "\n")
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	if text == "" {
+		lines = nil
+	}
+
+	lines, removals := removeQXUnsupportedProxyItems(lines)
+	names := make(map[string]bool, len(removals))
+	for _, removal := range removals {
+		names[removal.Name] = true
+	}
+	lines, refs := removeQXPolicyReferences(lines, names)
+
+	cleaned := strings.Join(lines, "\n")
+	if trailingNewline {
+		cleaned += "\n"
+	}
+
+	return CleanResult{Text: cleaned, Removals: removals, ReferenceCount: refs}
+}
+
+func ApplyQXSplitRules(text string) SplitResult {
+	trailingNewline := strings.HasSuffix(text, "\n")
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	if text == "" {
+		lines = nil
+	}
+
+	names := make(map[string]bool, len(QXSplitGroupNames))
+	for _, name := range QXSplitGroupNames {
+		names[name] = true
+	}
+
+	lines = upsertQXPolicyLines(lines, names)
+	lines = replaceQXFilterLocal(lines)
+
+	updated := strings.Join(lines, "\n")
+	if trailingNewline {
+		updated += "\n"
+	}
+
+	return SplitResult{
+		Text:       updated,
+		Changed:    updated != text,
+		GroupCount: len(QXSplitGroupNames),
+		RuleCount:  len(QXRuleLines),
+	}
+}
+
+func FixQXText(text string, applySplit bool) FixResult {
+	clean := CleanQXText(text)
+	finalText := clean.Text
+	split := SplitResult{Text: finalText}
+	if applySplit {
+		split = ApplyQXSplitRules(finalText)
+		finalText = split.Text
+	}
+
+	return FixResult{
+		Text:        finalText,
+		Clean:       clean,
+		Split:       split,
+		Changed:     finalText != text,
+		OriginalLen: len(text),
+	}
+}
+
+func FixQXFile(path string, applySplit bool, backup bool) (FixResult, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return FixResult{}, err
+	}
+
+	result := FixQXText(string(data), applySplit)
+	if !result.Changed {
+		return result, nil
+	}
+
+	if backup {
+		backupPath := NextBackupPath(path)
+		if err := copyFile(path, backupPath); err != nil {
+			return FixResult{}, err
+		}
+		result.BackupPath = backupPath
+		result.BackupMade = true
+	}
+
+	info, statErr := os.Stat(path)
+	perm := os.FileMode(0o644)
+	if statErr == nil {
+		perm = info.Mode().Perm()
+	}
+	if err := os.WriteFile(path, []byte(result.Text), perm); err != nil {
+		return FixResult{}, err
+	}
+
+	return result, nil
+}
+
+func AnalyzeQXFile(path string) (FixResult, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return FixResult{}, err
+	}
+	return FixQXText(string(data), true), nil
+}
+
 func NextBackupPath(path string) string {
 	candidate := path + ".bak"
 	if _, err := os.Stat(candidate); os.IsNotExist(err) {
@@ -167,6 +277,10 @@ func NextBackupPath(path string) string {
 }
 
 func DiscoverFiles(args []string) []string {
+	return DiscoverFilesForTarget(args, "stash")
+}
+
+func DiscoverFilesForTarget(args []string, target string) []string {
 	if len(args) > 0 {
 		paths := make([]string, 0, len(args))
 		for _, arg := range args {
@@ -177,7 +291,11 @@ func DiscoverFiles(args []string) []string {
 
 	seen := map[string]bool{}
 	var paths []string
-	for _, pattern := range []string{"*.yaml", "*.yml"} {
+	patterns := []string{"*.yaml", "*.yml"}
+	if strings.EqualFold(target, "qx") {
+		patterns = []string{"*.conf"}
+	}
+	for _, pattern := range patterns {
 		matches, _ := filepath.Glob(pattern)
 		for _, match := range matches {
 			info, err := os.Stat(match)
@@ -436,6 +554,283 @@ func insertLines(lines []string, index int, insert []string) []string {
 	result = append(result, insert...)
 	result = append(result, lines[index:]...)
 	return result
+}
+
+func qxSectionBounds(lines []string, sectionName string) (int, int, bool) {
+	expected := "[" + strings.ToLower(sectionName) + "]"
+	for start, line := range lines {
+		if strings.EqualFold(strings.TrimSpace(stripQXComment(line)), expected) {
+			end := len(lines)
+			for i := start + 1; i < len(lines); i++ {
+				if qxSectionPattern.MatchString(lines[i]) {
+					end = i
+					break
+				}
+			}
+			return start, end, true
+		}
+	}
+	return 0, 0, false
+}
+
+func removeQXUnsupportedProxyItems(lines []string) ([]string, []Removal) {
+	sectionStart, sectionEnd, ok := qxSectionBounds(lines, "server_local")
+	if !ok {
+		return lines, nil
+	}
+
+	var removals []Removal
+	keep := make([]bool, len(lines))
+	for i := range keep {
+		keep[i] = true
+	}
+
+	for i := sectionStart + 1; i < sectionEnd; i++ {
+		if !isQXUnsupportedProxyLine(lines[i]) {
+			continue
+		}
+		name := qxProxyTag(lines[i])
+		if name == "" {
+			name = fmt.Sprintf("<unsupported:%d>", i+1)
+		}
+		removals = append(removals, Removal{Name: name, Line: i + 1, UUID: "hy2"})
+		keep[i] = false
+	}
+
+	if len(removals) == 0 {
+		return lines, removals
+	}
+
+	filtered := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if keep[i] {
+			filtered = append(filtered, line)
+		}
+	}
+	return filtered, removals
+}
+
+func isQXUnsupportedProxyLine(line string) bool {
+	value := strings.TrimSpace(stripInlineComment(line))
+	if value == "" {
+		return false
+	}
+	lower := strings.ToLower(value)
+	return strings.HasPrefix(lower, "hysteria2=") ||
+		strings.HasPrefix(lower, "hy2=") ||
+		strings.Contains(lower, "type=hysteria2") ||
+		strings.Contains(lower, "type=hy2") ||
+		strings.Contains(lower, "protocol=hysteria2") ||
+		strings.Contains(lower, "protocol=hy2")
+}
+
+func qxProxyTag(line string) string {
+	match := qxTagPattern.FindStringSubmatch(stripInlineComment(line))
+	if len(match) < 2 {
+		return ""
+	}
+	return unquote(strings.TrimSpace(match[1]))
+}
+
+func removeQXPolicyReferences(lines []string, names map[string]bool) ([]string, int) {
+	if len(names) == 0 {
+		return lines, 0
+	}
+
+	sectionStart, sectionEnd, ok := qxSectionBounds(lines, "policy")
+	if !ok {
+		return lines, 0
+	}
+
+	removed := 0
+	output := make([]string, 0, len(lines))
+	output = append(output, lines[:sectionStart+1]...)
+	for _, line := range lines[sectionStart+1 : sectionEnd] {
+		updated, count := removeQXPolicyLineReferences(line, names)
+		removed += count
+		output = append(output, updated)
+	}
+	output = append(output, lines[sectionEnd:]...)
+	return output, removed
+}
+
+func removeQXPolicyLineReferences(line string, names map[string]bool) (string, int) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+		return line, 0
+	}
+
+	comment := ""
+	body := line
+	if idx := strings.Index(body, "#"); idx >= 0 {
+		comment = body[idx:]
+		body = body[:idx]
+	}
+
+	parts := strings.Split(body, ",")
+	if len(parts) < 2 {
+		return line, 0
+	}
+
+	removed := 0
+	kept := []string{strings.TrimRight(parts[0], " ")}
+	for _, part := range parts[1:] {
+		value := unquote(strings.TrimSpace(part))
+		if names[value] {
+			removed++
+			continue
+		}
+		kept = append(kept, strings.TrimSpace(part))
+	}
+
+	if removed == 0 {
+		return line, 0
+	}
+
+	updated := strings.Join(kept, ", ")
+	if comment != "" {
+		updated += " " + comment
+	}
+	return updated, removed
+}
+
+func upsertQXPolicyLines(lines []string, names map[string]bool) []string {
+	start, end, ok := qxSectionBounds(lines, "policy")
+	if !ok {
+		insertAt := len(lines)
+		if filterStart, _, hasFilter := qxSectionBounds(lines, "filter_local"); hasFilter {
+			insertAt = filterStart
+		}
+		insert := append([]string{"[policy]"}, QXPolicyLines...)
+		return insertLines(lines, insertAt, insert)
+	}
+
+	section := make([]string, 0, end-start+len(QXPolicyLines))
+	section = append(section, lines[start])
+	for _, line := range lines[start+1 : end] {
+		if qxPolicyNameManaged(line, names) {
+			continue
+		}
+		section = append(section, line)
+	}
+	section = append(section, QXPolicyLines...)
+
+	result := make([]string, 0, len(lines)-end+start+len(section))
+	result = append(result, lines[:start]...)
+	result = append(result, section...)
+	result = append(result, lines[end:]...)
+	return result
+}
+
+func qxPolicyNameManaged(line string, names map[string]bool) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+		return false
+	}
+	if idx := strings.Index(trimmed, "#"); idx >= 0 {
+		trimmed = strings.TrimSpace(trimmed[:idx])
+	}
+	eq := strings.Index(trimmed, "=")
+	comma := strings.Index(trimmed, ",")
+	if eq < 0 || comma < 0 || comma < eq {
+		return false
+	}
+	name := unquote(strings.TrimSpace(trimmed[eq+1 : comma]))
+	return names[name]
+}
+
+func replaceQXFilterLocal(lines []string) []string {
+	replacement := append([]string{"[filter_local]"}, QXRuleLines...)
+	start, end, ok := qxSectionBounds(lines, "filter_local")
+	if !ok {
+		return append(lines, replacement...)
+	}
+	result := make([]string, 0, len(lines)-end+start+len(replacement))
+	result = append(result, lines[:start]...)
+	result = append(result, replacement...)
+	result = append(result, lines[end:]...)
+	return result
+}
+
+func qxRuleLinesFromStash(lines []string) []string {
+	rules := make([]string, 0, len(lines))
+	for _, line := range lines {
+		rule, ok := qxRuleLineFromStash(line)
+		if ok {
+			rules = append(rules, rule)
+		}
+	}
+	return rules
+}
+
+func qxRuleLineFromStash(line string) (string, bool) {
+	value := strings.TrimSpace(line)
+	value = strings.TrimPrefix(value, "- ")
+	value = unquote(strings.TrimSpace(value))
+	if value == "" {
+		return "", false
+	}
+
+	parts := strings.Split(value, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	if len(parts) < 2 {
+		return "", false
+	}
+
+	switch strings.ToUpper(parts[0]) {
+	case "DOMAIN-SUFFIX":
+		parts[0] = "HOST-SUFFIX"
+	case "DOMAIN-KEYWORD":
+		parts[0] = "HOST-KEYWORD"
+	case "DOMAIN":
+		parts[0] = "HOST"
+	case "IP-CIDR6":
+		parts[0] = "IP6-CIDR"
+	case "MATCH":
+		parts[0] = "FINAL"
+		parts = parts[:2]
+	default:
+		parts[0] = strings.ToUpper(parts[0])
+	}
+
+	for i := 1; i < len(parts); i++ {
+		switch strings.ToUpper(parts[i]) {
+		case "DIRECT":
+			parts[i] = "direct"
+		case "REJECT":
+			parts[i] = "reject"
+		case "NO-RESOLVE":
+			parts[i] = "no-resolve"
+		}
+	}
+
+	return strings.Join(parts, ","), true
+}
+
+func stripInlineComment(line string) string {
+	if idx := strings.Index(line, "#"); idx >= 0 {
+		return line[:idx]
+	}
+	return line
+}
+
+func stripQXComment(line string) string {
+	hash := strings.Index(line, "#")
+	semicolon := strings.Index(line, ";")
+	switch {
+	case hash >= 0 && semicolon >= 0 && hash < semicolon:
+		return line[:hash]
+	case hash >= 0 && semicolon >= 0:
+		return line[:semicolon]
+	case hash >= 0:
+		return line[:hash]
+	case semicolon >= 0:
+		return line[:semicolon]
+	default:
+		return line
+	}
 }
 
 func copyFile(src string, dst string) error {

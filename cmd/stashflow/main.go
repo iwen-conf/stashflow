@@ -43,8 +43,10 @@ const (
 )
 
 type model struct {
+	args        []string
 	paths       []string
 	targets     []target
+	target      string
 	selected    int
 	offset      int
 	width       int
@@ -67,18 +69,28 @@ var (
 
 func main() {
 	var noBackup bool
+	var targetName string
 	flag.BoolVar(&noBackup, "no-backup", false, "写入前不创建 .bak 备份")
+	flag.StringVar(&targetName, "target", "stash", "处理目标：stash 或 qx")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "用法: %s [选项] [订阅.yaml ...]\n\n", os.Args[0])
-		fmt.Fprintln(flag.CommandLine.Output(), "中文 TUI，用于清理异常 UUID 节点并补回 Stash 分流规则。")
+		fmt.Fprintf(flag.CommandLine.Output(), "用法: %s [选项] [配置文件 ...]\n\n", os.Args[0])
+		fmt.Fprintln(flag.CommandLine.Output(), "中文 TUI，用于清理 Stash 异常 UUID 或 QX 不支持的 hy2 节点，并补回分流规则。")
 		fmt.Fprintln(flag.CommandLine.Output(), "\n选项:")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 
-	paths := stashflow.DiscoverFiles(flag.Args())
+	targetName = strings.ToLower(strings.TrimSpace(targetName))
+	if targetName != "stash" && targetName != "qx" {
+		fmt.Fprintf(os.Stderr, "不支持的 target: %s\n", targetName)
+		os.Exit(2)
+	}
+
+	paths := stashflow.DiscoverFilesForTarget(flag.Args(), targetName)
 	m := model{
+		args:    flag.Args(),
 		paths:   paths,
+		target:  targetName,
 		backup:  !noBackup,
 		message: "已扫描订阅文件",
 	}
@@ -135,6 +147,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r", "R":
 			m.refresh()
 			m.message = "已重新扫描"
+		case "t", "T":
+			m.switchTarget()
 		case "b", "B":
 			m.backup = !m.backup
 			if m.backup {
@@ -144,7 +158,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if len(m.targets) == 0 {
-				m.message = "没有可处理的 YAML 文件"
+				m.message = "没有可处理的" + m.fileKindLabel() + "文件"
 				break
 			}
 			current := m.targets[m.selected]
@@ -153,7 +167,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.confirm = confirmOne
-			m.confirmText = fmt.Sprintf("确认修复 %s？", filepath.Base(current.path))
+			m.confirmText = fmt.Sprintf("确认保存 %s 的%s修复？", filepath.Base(current.path), m.targetDisplayName())
 		case "A", "a":
 			count := m.dirtyCount()
 			if count == 0 {
@@ -161,7 +175,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.confirm = confirmAll
-			m.confirmText = fmt.Sprintf("确认修复全部 %d 个文件？", count)
+			m.confirmText = fmt.Sprintf("确认保存全部 %d 个%s文件？", count, m.targetDisplayName())
 		}
 	}
 	return m, nil
@@ -187,11 +201,11 @@ func (m model) View() string {
 		backupText = "关"
 	}
 
-	b.WriteString(titleStyle.Render("StashFlow 订阅修复"))
+	b.WriteString(titleStyle.Render(m.title()))
 	b.WriteByte('\n')
-	b.WriteString(mutedStyle.Render(fmt.Sprintf("文件: %d | 异常 UUID: %d | 待补分流: %d | 引用: %d | 备份: %s", len(m.targets), totalBad, totalSplit, totalRefs, backupText)))
+	b.WriteString(mutedStyle.Render(fmt.Sprintf("目标: %s | 文件: %d | %s: %d | 待补分流: %d | 引用: %d | 备份: %s", m.targetDisplayName(), len(m.targets), m.issueLabel(), totalBad, totalSplit, totalRefs, backupText)))
 	b.WriteByte('\n')
-	b.WriteString(mutedStyle.Render("↑/↓/j/k 选择 · Enter 修复当前 · A 修复全部 · b 切换备份 · r 重新扫描 · q 退出"))
+	b.WriteString(mutedStyle.Render("↑/↓/j/k 选择 · t 切换 Stash/QX · Enter 保存当前 · A 保存全部 · b 切换备份 · r 重新扫描 · q 退出"))
 	b.WriteString("\n\n")
 
 	listWidth := width / 2
@@ -226,11 +240,27 @@ func (m *model) refresh() {
 	m.targets = make([]target, 0, len(m.paths))
 	for _, path := range m.paths {
 		result, err := stashflow.AnalyzeFile(path)
+		if m.target == "qx" {
+			result, err = stashflow.AnalyzeQXFile(path)
+		}
 		m.targets = append(m.targets, target{path: path, result: result, err: err})
 	}
 	if m.selected >= len(m.targets) {
 		m.selected = max(0, len(m.targets)-1)
 	}
+}
+
+func (m *model) switchTarget() {
+	if m.target == "qx" {
+		m.target = "stash"
+	} else {
+		m.target = "qx"
+	}
+	m.paths = stashflow.DiscoverFilesForTarget(m.args, m.target)
+	m.selected = 0
+	m.offset = 0
+	m.refresh()
+	m.message = "已切换到 " + m.targetDisplayName() + " 并重新扫描"
 }
 
 func (m *model) fixSelected() {
@@ -240,12 +270,15 @@ func (m *model) fixSelected() {
 	}
 	t := m.targets[m.selected]
 	result, err := stashflow.FixFile(t.path, true, m.backup)
+	if m.target == "qx" {
+		result, err = stashflow.FixQXFile(t.path, true, m.backup)
+	}
 	if err != nil {
 		m.message = filepath.Base(t.path) + ": " + err.Error()
 		return
 	}
 	m.refresh()
-	m.message = fixMessage(t.path, result)
+	m.message = m.fixMessage(t.path, result)
 }
 
 func (m *model) fixAll() {
@@ -256,12 +289,15 @@ func (m *model) fixAll() {
 			continue
 		}
 		result, err := stashflow.FixFile(t.path, true, m.backup)
+		if m.target == "qx" {
+			result, err = stashflow.FixQXFile(t.path, true, m.backup)
+		}
 		if err != nil {
 			last = filepath.Base(t.path) + ": " + err.Error()
 			continue
 		}
 		count++
-		last = fixMessage(t.path, result)
+		last = m.fixMessage(t.path, result)
 	}
 	m.refresh()
 	if count == 0 {
@@ -275,13 +311,13 @@ func (m *model) fixAll() {
 	m.message = fmt.Sprintf("已修复 %d 个文件", count)
 }
 
-func fixMessage(path string, result stashflow.FixResult) string {
+func (m model) fixMessage(path string, result stashflow.FixResult) string {
 	if !result.Changed {
 		return filepath.Base(path) + ": 无需处理"
 	}
 	parts := []string{}
 	if len(result.Clean.Removals) > 0 {
-		parts = append(parts, fmt.Sprintf("删除 %d 个异常节点", len(result.Clean.Removals)))
+		parts = append(parts, fmt.Sprintf("删除 %d 个%s", len(result.Clean.Removals), m.issueItemLabel()))
 	}
 	if result.Split.Changed {
 		parts = append(parts, fmt.Sprintf("补回 %d 个分组/%d 条规则", result.Split.GroupCount, result.Split.RuleCount))
@@ -328,14 +364,14 @@ func (m *model) adjustOffset(listHeight int) {
 func (m model) renderList(width int, height int) string {
 	lines := []string{sectionStyle.Render("文件")}
 	if len(m.targets) == 0 {
-		lines = append(lines, errorStyle.Render("未找到 YAML 文件"))
+		lines = append(lines, errorStyle.Render("未找到"+m.fileKindLabel()+"文件"))
 		return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 	}
 
 	end := min(len(m.targets), m.offset+height)
 	for i := m.offset; i < end; i++ {
 		t := m.targets[i]
-		status, style := targetStatus(t)
+		status, style := m.targetStatus(t)
 		prefix := " "
 		if i == m.selected {
 			prefix = ">"
@@ -351,15 +387,15 @@ func (m model) renderList(width int, height int) string {
 	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 }
 
-func targetStatus(t target) (string, lipgloss.Style) {
+func (m model) targetStatus(t target) (string, lipgloss.Style) {
 	if t.err != nil {
 		return "错误", errorStyle
 	}
 	if t.badCount() > 0 && t.splitNeeded() {
-		return fmt.Sprintf("%d坏+分流", t.badCount()), warnStyle
+		return fmt.Sprintf("%d%s+分流", t.badCount(), m.shortIssueLabel()), warnStyle
 	}
 	if t.badCount() > 0 {
-		return fmt.Sprintf("%d坏", t.badCount()), warnStyle
+		return fmt.Sprintf("%d%s", t.badCount(), m.shortIssueLabel()), warnStyle
 	}
 	if t.splitNeeded() {
 		return "补分流", warnStyle
@@ -380,33 +416,40 @@ func (m model) renderDetail(width int, height int) string {
 	}
 
 	if t.badCount() == 0 && !t.splitNeeded() {
-		lines = append(lines, okStyle.Render("无需处理：异常 UUID 已清理，分流模板已应用。"))
+		lines = append(lines, okStyle.Render("无需处理："+m.issueLabel()+"已清理，分流模板已应用。"))
 		lines = append(lines, mutedStyle.Render("路径: "+t.path))
 		return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 	}
 
 	if t.badCount() > 0 {
-		lines = append(lines, warnStyle.Render(fmt.Sprintf("异常 UUID 节点: %d，需删除引用: %d", t.badCount(), t.referenceCount())))
+		lines = append(lines, warnStyle.Render(fmt.Sprintf("%s: %d，需删除引用: %d", m.issueLabel(), t.badCount(), t.referenceCount())))
 		remaining := max(0, height-len(lines)-5)
 		for i, removal := range t.result.Clean.Removals {
 			if i >= remaining {
 				lines = append(lines, mutedStyle.Render(fmt.Sprintf("... 还有 %d 个", t.badCount()-i)))
 				break
 			}
-			uuid := removal.UUID
-			if len([]rune(uuid)) > 30 {
-				uuid = string([]rune(uuid)[:27]) + "..."
+			detail := removal.UUID
+			if m.target == "qx" {
+				detail = "protocol=hy2"
 			}
-			lines = append(lines, truncate(fmt.Sprintf("第 %-4d 行 %s  uuid=%s", removal.Line, removal.Name, uuid), width))
+			if len([]rune(detail)) > 30 {
+				detail = string([]rune(detail)[:27]) + "..."
+			}
+			lines = append(lines, truncate(fmt.Sprintf("第 %-4d 行 %s  %s", removal.Line, removal.Name, detail), width))
 		}
 	}
 
 	if t.splitNeeded() {
 		lines = append(lines, warnStyle.Render(fmt.Sprintf("需要补回分流模板：%d 个分组，%d 条规则", t.result.Split.GroupCount, t.result.Split.RuleCount)))
 		remaining := max(0, height-len(lines)-3)
-		for i, name := range stashflow.StashSplitGroupNames {
+		groupNames := stashflow.StashSplitGroupNames
+		if m.target == "qx" {
+			groupNames = stashflow.QXSplitGroupNames
+		}
+		for i, name := range groupNames {
 			if i >= remaining {
-				lines = append(lines, mutedStyle.Render(fmt.Sprintf("... 还有 %d 个分组", len(stashflow.StashSplitGroupNames)-i)))
+				lines = append(lines, mutedStyle.Render(fmt.Sprintf("... 还有 %d 个分组", len(groupNames)-i)))
 				break
 			}
 			lines = append(lines, "- "+name)
@@ -415,6 +458,48 @@ func (m model) renderDetail(width int, height int) string {
 
 	lines = append(lines, mutedStyle.Render("路径: "+t.path))
 	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func (m model) title() string {
+	if m.target == "qx" {
+		return "StashFlow QX 订阅修复"
+	}
+	return "StashFlow Stash 订阅修复"
+}
+
+func (m model) targetDisplayName() string {
+	if m.target == "qx" {
+		return "QX"
+	}
+	return "Stash"
+}
+
+func (m model) issueLabel() string {
+	if m.target == "qx" {
+		return "不支持 hy2"
+	}
+	return "异常 UUID"
+}
+
+func (m model) issueItemLabel() string {
+	if m.target == "qx" {
+		return "hy2 节点"
+	}
+	return "异常节点"
+}
+
+func (m model) shortIssueLabel() string {
+	if m.target == "qx" {
+		return "hy2"
+	}
+	return "坏"
+}
+
+func (m model) fileKindLabel() string {
+	if m.target == "qx" {
+		return " QX "
+	}
+	return " YAML "
 }
 
 func truncate(value string, width int) string {

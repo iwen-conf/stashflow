@@ -288,6 +288,26 @@ var StashRuleLines = splitTemplate(`
 - 'MATCH,🐟 漏网之鱼'
 `)
 
+var QXSplitGroupNames = StashSplitGroupNames
+
+var QXPolicyLines = splitTemplate(`
+static=🛑 广告拦截, reject, direct, ✨ 星链Starlink
+static=💬 微信, direct, ✨ 星链Starlink
+static=🐧 腾讯服务, direct, ✨ 星链Starlink
+static=💰 支付服务, direct, ✨ 星链Starlink
+static=🇨🇳 国内流量, direct, ✨ 星链Starlink
+static=🤖 AI服务, ✨ 星链Starlink, 🚀 高速优选, 💠 最低延迟, direct
+static=💬 Telegram, ✨ 星链Starlink, 🚀 高速优选, 💠 最低延迟, direct
+static=📺 流媒体, ✨ 星链Starlink, 🚀 高速优选, 💠 最低延迟, direct
+static=🍎 Apple, direct, ✨ 星链Starlink
+static=Ⓜ️ Microsoft, direct, ✨ 星链Starlink
+static=🎮 游戏平台, direct, ✨ 星链Starlink
+static=🌐 国外流量, ✨ 星链Starlink, 🚀 高速优选, 💠 最低延迟, direct
+static=🐟 漏网之鱼, ✨ 星链Starlink, direct
+`)
+
+var QXRuleLines = qxRuleLinesFromStash(StashRuleLines)
+
 func splitTemplate(value string) []string {
 	value = strings.Trim(value, "\n")
 	if value == "" {
