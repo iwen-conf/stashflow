@@ -70,21 +70,26 @@ func processFile(path string, target string, applySplit bool, backup bool, dryRu
 		return fmt.Errorf("不是文件")
 	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-
-	result := stashflow.FixText(string(data), applySplit)
+	var result stashflow.FixResult
 	if target == "qx" {
-		result = stashflow.FixQXText(string(data), applySplit)
+		var err error
+		result, err = stashflow.PreviewQXFile(path, applySplit)
+		if err != nil {
+			return err
+		}
+	} else {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		result = stashflow.FixText(string(data), applySplit)
 	}
 	if !result.Changed {
 		if target == "qx" {
 			if applySplit {
-				fmt.Printf("%s: 未发现 QX 不支持的 hy2 节点，QX 分流模板已应用\n", path)
+				fmt.Printf("%s: QX 输出已是最新: %s\n", path, result.OutputPath)
 			} else {
-				fmt.Printf("%s: 未发现 QX 不支持的 hy2 节点\n", path)
+				fmt.Printf("%s: QX 输出已是最新: %s\n", path, result.OutputPath)
 			}
 		} else if applySplit {
 			fmt.Printf("%s: 未发现异常 UUID，Stash 分流模板已应用\n", path)
@@ -128,6 +133,21 @@ func processFile(path string, target string, applySplit bool, backup bool, dryRu
 
 	if dryRun {
 		fmt.Println("  预览模式：文件未修改")
+		if target == "qx" {
+			fmt.Printf("  将保存为: %s\n", result.OutputPath)
+		}
+		return nil
+	}
+
+	if target == "qx" {
+		result, err = stashflow.FixQXFile(path, applySplit, backup)
+		if err != nil {
+			return err
+		}
+		if result.BackupMade {
+			fmt.Printf("  备份: %s\n", result.BackupPath)
+		}
+		fmt.Printf("  已保存: %s\n", result.OutputPath)
 		return nil
 	}
 

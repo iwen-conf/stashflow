@@ -1,6 +1,8 @@
 package stashflow
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -78,5 +80,89 @@ func TestQXRuleLineFromStash(t *testing.T) {
 		if got != want {
 			t.Fatalf("expected %q, got %q", want, got)
 		}
+	}
+}
+
+func TestQXOutputPathUsesSourceNameWithQXSuffix(t *testing.T) {
+	got := QXOutputPath(filepath.Join("configs", "Starlink.conf"))
+	want := filepath.Join("configs", "Starlink-QX.yaml")
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestFixQXFileSavesAsQXYAMLWithoutOverwritingSource(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "Starlink.conf")
+	original := strings.Join([]string{
+		"[server_local]",
+		"hysteria2=hy2.example.com:443, password=p, tag=Hy2",
+		"[policy]",
+		"static=Proxy, Hy2, direct",
+		"",
+	}, "\n")
+	if err := os.WriteFile(source, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FixQXFile(source, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.OutputPath != filepath.Join(dir, "Starlink-QX.yaml") {
+		t.Fatalf("unexpected output path: %s", result.OutputPath)
+	}
+	if result.BackupMade {
+		t.Fatalf("did not expect a backup when creating a new output file")
+	}
+	sourceData, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(sourceData) != original {
+		t.Fatalf("expected source file to remain unchanged:\n%s", sourceData)
+	}
+	outputData, err := os.ReadFile(result.OutputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(outputData), "hysteria2=") || strings.Contains(string(outputData), "Hy2") {
+		t.Fatalf("expected output to remove unsupported QX proxy and references:\n%s", outputData)
+	}
+
+	preview, err := PreviewQXFile(source, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Changed {
+		t.Fatalf("expected generated QX output to be up to date")
+	}
+}
+
+func TestFixQXFileBacksUpExistingOutput(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "Starlink.conf")
+	if err := os.WriteFile(source, []byte("[server_local]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(dir, "Starlink-QX.yaml")
+	if err := os.WriteFile(output, []byte("old output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FixQXFile(source, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.BackupMade {
+		t.Fatalf("expected existing output to be backed up")
+	}
+	backupData, err := os.ReadFile(result.BackupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backupData) != "old output\n" {
+		t.Fatalf("expected backup to contain old output, got:\n%s", backupData)
 	}
 }

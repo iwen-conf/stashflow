@@ -46,6 +46,8 @@ stashflow --target qx "QuantumultX.conf"
 
 也可以直接运行 `stashflow` 后在 TUI 内按 `t` 在 Stash/QX 之间切换；切到 QX 后会重新扫描当前目录的 `.conf` 文件。
 
+QX 模式不会覆盖源文件，会保存为同目录下的 `源文件名-QX.yaml`，例如 `Starlink.conf` 会输出 `Starlink-QX.yaml`。如果同名输出文件已存在且备份开启，会先备份旧输出文件。
+
 按键：
 
 - `↑/↓` 或 `j/k`：移动选择

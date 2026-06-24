@@ -163,11 +163,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			current := m.targets[m.selected]
 			if !current.needsWork() {
-				m.message = filepath.Base(current.path) + ": 无需处理"
+				m.message = m.noWorkMessage(current)
 				break
 			}
 			m.confirm = confirmOne
-			m.confirmText = fmt.Sprintf("确认保存 %s 的%s修复？", filepath.Base(current.path), m.targetDisplayName())
+			m.confirmText = fmt.Sprintf("确认保存 %s？", m.saveTargetLabel(current))
 		case "A", "a":
 			count := m.dirtyCount()
 			if count == 0 {
@@ -313,6 +313,9 @@ func (m *model) fixAll() {
 
 func (m model) fixMessage(path string, result stashflow.FixResult) string {
 	if !result.Changed {
+		if result.OutputPath != "" {
+			return filepath.Base(path) + ": 输出已是最新 " + filepath.Base(result.OutputPath)
+		}
 		return filepath.Base(path) + ": 无需处理"
 	}
 	parts := []string{}
@@ -324,6 +327,9 @@ func (m model) fixMessage(path string, result stashflow.FixResult) string {
 	}
 	if result.BackupMade {
 		parts = append(parts, "备份 "+filepath.Base(result.BackupPath))
+	}
+	if result.OutputPath != "" {
+		parts = append(parts, "保存 "+filepath.Base(result.OutputPath))
 	}
 	return filepath.Base(path) + ": " + strings.Join(parts, "，")
 }
@@ -391,6 +397,9 @@ func (m model) targetStatus(t target) (string, lipgloss.Style) {
 	if t.err != nil {
 		return "错误", errorStyle
 	}
+	if m.target == "qx" && !t.needsWork() {
+		return "已保存", okStyle
+	}
 	if t.badCount() > 0 && t.splitNeeded() {
 		return fmt.Sprintf("%d%s+分流", t.badCount(), m.shortIssueLabel()), warnStyle
 	}
@@ -412,6 +421,13 @@ func (m model) renderDetail(width int, height int) string {
 	t := m.targets[m.selected]
 	if t.err != nil {
 		lines = append(lines, errorStyle.Render(t.err.Error()))
+		return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+	}
+
+	if m.target == "qx" && !t.needsWork() {
+		lines = append(lines, okStyle.Render("输出已是最新："+filepath.Base(t.result.OutputPath)))
+		lines = append(lines, mutedStyle.Render("源文件: "+t.path))
+		lines = append(lines, mutedStyle.Render("输出: "+t.result.OutputPath))
 		return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 	}
 
@@ -457,7 +473,24 @@ func (m model) renderDetail(width int, height int) string {
 	}
 
 	lines = append(lines, mutedStyle.Render("路径: "+t.path))
+	if t.result.OutputPath != "" {
+		lines = append(lines, mutedStyle.Render("保存为: "+t.result.OutputPath))
+	}
 	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func (m model) noWorkMessage(t target) string {
+	if m.target == "qx" && t.result.OutputPath != "" {
+		return filepath.Base(t.path) + ": 输出已是最新 " + filepath.Base(t.result.OutputPath)
+	}
+	return filepath.Base(t.path) + ": 无需处理"
+}
+
+func (m model) saveTargetLabel(t target) string {
+	if m.target == "qx" && t.result.OutputPath != "" {
+		return filepath.Base(t.result.OutputPath)
+	}
+	return filepath.Base(t.path) + " 的" + m.targetDisplayName() + "修复"
 }
 
 func (m model) title() string {

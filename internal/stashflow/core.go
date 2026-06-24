@@ -40,6 +40,7 @@ type FixResult struct {
 	Clean       CleanResult
 	Split       SplitResult
 	Changed     bool
+	OutputPath  string
 	BackupPath  string
 	BackupMade  bool
 	OriginalLen int
@@ -223,31 +224,35 @@ func FixQXText(text string, applySplit bool) FixResult {
 }
 
 func FixQXFile(path string, applySplit bool, backup bool) (FixResult, error) {
-	data, err := os.ReadFile(path)
+	result, err := PreviewQXFile(path, applySplit)
 	if err != nil {
 		return FixResult{}, err
 	}
-
-	result := FixQXText(string(data), applySplit)
 	if !result.Changed {
 		return result, nil
 	}
 
-	if backup {
-		backupPath := NextBackupPath(path)
-		if err := copyFile(path, backupPath); err != nil {
+	outputExists := false
+	perm := os.FileMode(0o644)
+	if info, err := os.Stat(result.OutputPath); err == nil {
+		outputExists = true
+		perm = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return FixResult{}, err
+	} else if info, err := os.Stat(path); err == nil {
+		perm = info.Mode().Perm()
+	}
+
+	if backup && outputExists {
+		backupPath := NextBackupPath(result.OutputPath)
+		if err := copyFile(result.OutputPath, backupPath); err != nil {
 			return FixResult{}, err
 		}
 		result.BackupPath = backupPath
 		result.BackupMade = true
 	}
 
-	info, statErr := os.Stat(path)
-	perm := os.FileMode(0o644)
-	if statErr == nil {
-		perm = info.Mode().Perm()
-	}
-	if err := os.WriteFile(path, []byte(result.Text), perm); err != nil {
+	if err := os.WriteFile(result.OutputPath, []byte(result.Text), perm); err != nil {
 		return FixResult{}, err
 	}
 
@@ -255,11 +260,27 @@ func FixQXFile(path string, applySplit bool, backup bool) (FixResult, error) {
 }
 
 func AnalyzeQXFile(path string) (FixResult, error) {
+	return PreviewQXFile(path, true)
+}
+
+func PreviewQXFile(path string, applySplit bool) (FixResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return FixResult{}, err
 	}
-	return FixQXText(string(data), true), nil
+
+	result := FixQXText(string(data), applySplit)
+	result.OutputPath = QXOutputPath(path)
+	output, err := os.ReadFile(result.OutputPath)
+	switch {
+	case err == nil:
+		result.Changed = string(output) != result.Text
+	case os.IsNotExist(err):
+		result.Changed = true
+	default:
+		return FixResult{}, err
+	}
+	return result, nil
 }
 
 func NextBackupPath(path string) string {
@@ -274,6 +295,14 @@ func NextBackupPath(path string) string {
 			return candidate
 		}
 	}
+}
+
+func QXOutputPath(path string) string {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	return filepath.Join(dir, name+"-QX.yaml")
 }
 
 func DiscoverFiles(args []string) []string {
