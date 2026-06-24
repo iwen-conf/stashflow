@@ -1,11 +1,17 @@
 package stashflow
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var (
@@ -362,12 +368,28 @@ func DiscoverFiles(args []string) []string {
 }
 
 func DiscoverFilesForTarget(args []string, target string) []string {
+	paths, err := ResolveFilesForTarget(args, target)
+	if err != nil {
+		return []string{err.Error()}
+	}
+	return paths
+}
+
+func ResolveFilesForTarget(args []string, target string) ([]string, error) {
 	if len(args) > 0 {
 		paths := make([]string, 0, len(args))
 		for _, arg := range args {
+			if IsHTTPURL(arg) {
+				path, err := DownloadSubscription(arg, target)
+				if err != nil {
+					return nil, err
+				}
+				paths = append(paths, path)
+				continue
+			}
 			paths = append(paths, expandHome(arg))
 		}
-		return paths
+		return paths, nil
 	}
 
 	seen := map[string]bool{}
@@ -386,7 +408,100 @@ func DiscoverFilesForTarget(args []string, target string) []string {
 			}
 		}
 	}
-	return paths
+	return paths, nil
+}
+
+func HasURLInput(args []string) bool {
+	for _, arg := range args {
+		if IsHTTPURL(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsHTTPURL(value string) bool {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
+}
+
+func DownloadSubscription(rawURL string, target string) (string, error) {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "stashflow")
+
+	client := http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("下载订阅失败: HTTP %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return "", fmt.Errorf("下载订阅失败: 响应为空")
+	}
+
+	path := SubscriptionDownloadPath(rawURL, target)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func SubscriptionDownloadPath(rawURL string, target string) string {
+	parsed, err := url.Parse(rawURL)
+	name := "subscription"
+	if err == nil {
+		host := sanitizeFilename(parsed.Hostname())
+		base := sanitizeFilename(strings.TrimSuffix(filepath.Base(parsed.Path), filepath.Ext(parsed.Path)))
+		switch {
+		case host != "" && base != "" && base != ".":
+			name = host + "-" + base
+		case host != "":
+			name = host + "-subscription"
+		case base != "" && base != ".":
+			name = base
+		}
+	}
+
+	sum := sha256.Sum256([]byte(rawURL))
+	suffix := hex.EncodeToString(sum[:])[:8]
+	ext := ".yaml"
+	if strings.EqualFold(target, "qx") {
+		ext = ".conf"
+	}
+	return name + "-" + suffix + ext
+}
+
+func sanitizeFilename(value string) string {
+	value = strings.TrimSpace(value)
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-._")
 }
 
 func leadingSpaces(line string) int {

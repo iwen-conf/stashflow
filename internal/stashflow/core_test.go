@@ -1,6 +1,9 @@
 package stashflow
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,5 +245,70 @@ func TestFixQXFileUpdatesProfileWhenOutputIsCurrent(t *testing.T) {
 	}
 	if !fixed.ProfileUpdated {
 		t.Fatalf("expected QX Lazycat profile to be updated")
+	}
+}
+
+func TestDownloadSubscriptionWritesQXConfWithoutLeakingQuery(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() {
+		_ = os.Chdir("/")
+	})
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "[server_local]")
+		fmt.Fprintln(w, "hysteria2=hy2.example.com:443, password=p, tag=Hy2")
+	}))
+	defer server.Close()
+
+	rawURL := server.URL + "/v1/subscribe?starlink=secret-token"
+	path, err := DownloadSubscription(rawURL, "qx")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if filepath.Ext(path) != ".conf" {
+		t.Fatalf("expected QX URL download to use .conf, got %s", path)
+	}
+	if strings.Contains(path, "secret-token") || strings.Contains(path, "starlink") {
+		t.Fatalf("expected local path to avoid query secrets, got %s", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "hysteria2=") {
+		t.Fatalf("expected downloaded subscription content, got:\n%s", data)
+	}
+}
+
+func TestResolveFilesForTargetDownloadsHTTPURL(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() {
+		_ = os.Chdir("/")
+	})
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "proxies: []")
+	}))
+	defer server.Close()
+
+	paths, err := ResolveFilesForTarget([]string{server.URL + "/sub"}, "stash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("expected one path, got %d", len(paths))
+	}
+	if filepath.Ext(paths[0]) != ".yaml" {
+		t.Fatalf("expected Stash URL download to use .yaml, got %s", paths[0])
+	}
+	if _, err := os.Stat(paths[0]); err != nil {
+		t.Fatal(err)
 	}
 }

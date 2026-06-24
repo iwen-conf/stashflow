@@ -52,6 +52,7 @@ type model struct {
 	height      int
 	backup      bool
 	message     string
+	scanErr     error
 	confirm     confirmKind
 	confirmText string
 }
@@ -81,13 +82,22 @@ func main() {
 	}
 
 	targetName := "stash"
-	paths := stashflow.DiscoverFilesForTarget(args, targetName)
+	if stashflow.HasURLInput(args) {
+		targetName = "qx"
+	}
+	paths, scanErr := stashflow.ResolveFilesForTarget(args, targetName)
 	m := model{
 		args:    args,
 		paths:   paths,
 		target:  targetName,
 		backup:  true,
 		message: "已扫描订阅文件",
+		scanErr: scanErr,
+	}
+	if scanErr != nil {
+		m.message = scanErr.Error()
+	} else if stashflow.HasURLInput(args) {
+		m.message = "已下载订阅并切换到 QX"
 	}
 	m.refresh()
 
@@ -239,6 +249,10 @@ func (m model) View() string {
 
 func (m *model) refresh() {
 	m.targets = make([]target, 0, len(m.paths))
+	if m.scanErr != nil {
+		m.targets = append(m.targets, target{path: m.scanErr.Error(), err: m.scanErr})
+		return
+	}
 	for _, path := range m.paths {
 		result, err := stashflow.AnalyzeFile(path)
 		if m.target == "qx" {
@@ -257,10 +271,16 @@ func (m *model) switchTarget() {
 	} else {
 		m.target = "qx"
 	}
-	m.paths = stashflow.DiscoverFilesForTarget(m.args, m.target)
+	paths, scanErr := stashflow.ResolveFilesForTarget(m.args, m.target)
+	m.paths = paths
+	m.scanErr = scanErr
 	m.selected = 0
 	m.offset = 0
 	m.refresh()
+	if scanErr != nil {
+		m.message = scanErr.Error()
+		return
+	}
 	m.message = "已切换到 " + m.targetDisplayName() + " 并重新扫描"
 }
 

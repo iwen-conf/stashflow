@@ -38,6 +38,14 @@ stashflow
 stashflow "Starlink.yaml"
 ```
 
+如果 QX 直接添加订阅提示 `Response invalid`，把订阅 URL 交给 StashFlow 先下载并修复：
+
+```bash
+stashflow "https://example.com/v1/subscribe?token=..."
+```
+
+URL 输入会默认进入 QX 模式，先在当前目录保存一份本地 `.conf`，再生成同名 `-QX.yaml` 输出。文件名不会包含 URL query 里的订阅 Token。
+
 运行 `stashflow` 后在 TUI 内按 `t` 在 Stash/QX 之间切换；切到 QX 后会重新扫描当前目录的 `.conf` 文件。
 
 QX 模式不会覆盖源文件，会保存为同目录下的 `源文件名-QX.yaml`，例如 `Starlink.conf` 会输出 `Starlink-QX.yaml`。如果同名输出文件已存在且备份开启，会先备份旧输出文件。
