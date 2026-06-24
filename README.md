@@ -44,6 +44,8 @@ QX 模式不会覆盖源文件，会保存为同目录下的 `源文件名-QX.ya
 
 QX 输出会自动加入懒猫微服打洞优化：`*.heiyu.space`、`*.lazycat.cloud` 使用真实 DNS，`6.6.6.6/32`、`2000::6666/128` 加入 QX `excluded_routes`，并将 `heiyu.space`、`lazycat.cloud` 和 `fc03:1136:3800::/40` 直连，减少 QX TUN 对懒猫直连/穿透逻辑的干扰。
 
+保存 QX 输出时也会同步维护 Quantumult X 的 iCloud 分流数据文件 `Documents/Profiles/FILTER_LAZYCAT`，可在 QX 的本地/iCloud 分流资源中引用。
+
 按键：
 
 - `↑/↓` 或 `j/k`：移动选择

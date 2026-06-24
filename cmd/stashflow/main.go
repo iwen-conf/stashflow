@@ -329,8 +329,11 @@ func (m model) fixMessage(path string, result stashflow.FixResult) string {
 	if result.BackupMade {
 		parts = append(parts, "备份 "+filepath.Base(result.BackupPath))
 	}
-	if result.OutputPath != "" {
+	if result.OutputChanged && result.OutputPath != "" {
 		parts = append(parts, "保存 "+filepath.Base(result.OutputPath))
+	}
+	if result.ProfileUpdated {
+		parts = append(parts, "更新 "+filepath.Base(result.ProfilePath))
 	}
 	return filepath.Base(path) + ": " + strings.Join(parts, "，")
 }
@@ -401,6 +404,9 @@ func (m model) targetStatus(t target) (string, lipgloss.Style) {
 	if m.target == "qx" && !t.needsWork() {
 		return "已保存", okStyle
 	}
+	if m.target == "qx" && t.result.ProfileChanged && !t.result.OutputChanged {
+		return "分流数据", warnStyle
+	}
 	if t.badCount() > 0 && t.splitNeeded() {
 		return fmt.Sprintf("%d%s+分流", t.badCount(), m.shortIssueLabel()), warnStyle
 	}
@@ -426,9 +432,17 @@ func (m model) renderDetail(width int, height int) string {
 	}
 
 	if m.target == "qx" && !t.needsWork() {
-		lines = append(lines, okStyle.Render("输出已是最新："+filepath.Base(t.result.OutputPath)))
+		lines = append(lines, okStyle.Render("输出和分流数据已是最新："+filepath.Base(t.result.OutputPath)))
 		lines = append(lines, mutedStyle.Render("源文件: "+t.path))
 		lines = append(lines, mutedStyle.Render("输出: "+t.result.OutputPath))
+		lines = append(lines, mutedStyle.Render("QX 数据: "+t.result.ProfilePath))
+		return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+	}
+
+	if m.target == "qx" && t.result.ProfileChanged && !t.result.OutputChanged && !t.splitNeeded() && t.badCount() == 0 {
+		lines = append(lines, warnStyle.Render("需要更新 QX 分流数据："+filepath.Base(t.result.ProfilePath)))
+		lines = append(lines, mutedStyle.Render("路径: "+t.path))
+		lines = append(lines, mutedStyle.Render("QX 数据: "+t.result.ProfilePath))
 		return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 	}
 
@@ -477,17 +491,23 @@ func (m model) renderDetail(width int, height int) string {
 	if t.result.OutputPath != "" {
 		lines = append(lines, mutedStyle.Render("保存为: "+t.result.OutputPath))
 	}
+	if t.result.ProfilePath != "" {
+		lines = append(lines, mutedStyle.Render("QX 数据: "+t.result.ProfilePath))
+	}
 	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 }
 
 func (m model) noWorkMessage(t target) string {
 	if m.target == "qx" && t.result.OutputPath != "" {
-		return filepath.Base(t.path) + ": 输出已是最新 " + filepath.Base(t.result.OutputPath)
+		return filepath.Base(t.path) + ": 输出和分流数据已是最新 " + filepath.Base(t.result.OutputPath)
 	}
 	return filepath.Base(t.path) + ": 无需处理"
 }
 
 func (m model) saveTargetLabel(t target) string {
+	if m.target == "qx" && t.result.ProfileChanged && !t.result.OutputChanged {
+		return filepath.Base(t.result.ProfilePath)
+	}
 	if m.target == "qx" && t.result.OutputPath != "" {
 		return filepath.Base(t.result.OutputPath)
 	}

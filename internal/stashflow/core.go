@@ -36,14 +36,18 @@ type SplitResult struct {
 }
 
 type FixResult struct {
-	Text        string
-	Clean       CleanResult
-	Split       SplitResult
-	Changed     bool
-	OutputPath  string
-	BackupPath  string
-	BackupMade  bool
-	OriginalLen int
+	Text           string
+	Clean          CleanResult
+	Split          SplitResult
+	Changed        bool
+	OutputPath     string
+	OutputChanged  bool
+	ProfilePath    string
+	ProfileChanged bool
+	ProfileUpdated bool
+	BackupPath     string
+	BackupMade     bool
+	OriginalLen    int
 }
 
 func CleanText(text string) CleanResult {
@@ -233,28 +237,37 @@ func FixQXFile(path string, applySplit bool, backup bool) (FixResult, error) {
 		return result, nil
 	}
 
-	outputExists := false
-	perm := os.FileMode(0o644)
-	if info, err := os.Stat(result.OutputPath); err == nil {
-		outputExists = true
-		perm = info.Mode().Perm()
-	} else if !os.IsNotExist(err) {
-		return FixResult{}, err
-	} else if info, err := os.Stat(path); err == nil {
-		perm = info.Mode().Perm()
-	}
+	if result.OutputChanged {
+		outputExists := false
+		perm := os.FileMode(0o644)
+		if info, err := os.Stat(result.OutputPath); err == nil {
+			outputExists = true
+			perm = info.Mode().Perm()
+		} else if !os.IsNotExist(err) {
+			return FixResult{}, err
+		} else if info, err := os.Stat(path); err == nil {
+			perm = info.Mode().Perm()
+		}
 
-	if backup && outputExists {
-		backupPath := NextBackupPath(result.OutputPath)
-		if err := copyFile(result.OutputPath, backupPath); err != nil {
+		if backup && outputExists {
+			backupPath := NextBackupPath(result.OutputPath)
+			if err := copyFile(result.OutputPath, backupPath); err != nil {
+				return FixResult{}, err
+			}
+			result.BackupPath = backupPath
+			result.BackupMade = true
+		}
+
+		if err := os.WriteFile(result.OutputPath, []byte(result.Text), perm); err != nil {
 			return FixResult{}, err
 		}
-		result.BackupPath = backupPath
-		result.BackupMade = true
 	}
 
-	if err := os.WriteFile(result.OutputPath, []byte(result.Text), perm); err != nil {
-		return FixResult{}, err
+	if result.ProfileChanged {
+		if err := WriteQXLazycatProfile(); err != nil {
+			return FixResult{}, err
+		}
+		result.ProfileUpdated = true
 	}
 
 	return result, nil
@@ -275,11 +288,27 @@ func PreviewQXFile(path string, applySplit bool) (FixResult, error) {
 	output, err := os.ReadFile(result.OutputPath)
 	switch {
 	case err == nil:
-		result.Changed = string(output) != result.Text
+		result.OutputChanged = string(output) != result.Text
 	case os.IsNotExist(err):
-		result.Changed = true
+		result.OutputChanged = true
 	default:
 		return FixResult{}, err
+	}
+	result.Changed = result.OutputChanged
+
+	if applySplit {
+		profilePath := QXLazycatProfilePath()
+		result.ProfilePath = profilePath
+		profile, err := os.ReadFile(profilePath)
+		switch {
+		case err == nil:
+			result.ProfileChanged = string(profile) != QXLazycatProfileText()
+		case os.IsNotExist(err):
+			result.ProfileChanged = true
+		default:
+			return FixResult{}, err
+		}
+		result.Changed = result.Changed || result.ProfileChanged
 	}
 	return result, nil
 }
@@ -304,6 +333,28 @@ func QXOutputPath(path string) string {
 	ext := filepath.Ext(base)
 	name := strings.TrimSuffix(base, ext)
 	return filepath.Join(dir, name+"-QX.yaml")
+}
+
+func QXLazycatProfilePath() string {
+	if dir := os.Getenv("STASHFLOW_QX_PROFILES_DIR"); dir != "" {
+		return filepath.Join(expandHome(dir), "FILTER_LAZYCAT")
+	}
+	return filepath.Join(
+		os.Getenv("HOME"),
+		"Library/Mobile Documents/iCloud~com~crossutility~quantumult-x/Documents/Profiles/FILTER_LAZYCAT",
+	)
+}
+
+func QXLazycatProfileText() string {
+	return strings.Join(QXLazycatProfileLines, "\n") + "\n"
+}
+
+func WriteQXLazycatProfile() error {
+	path := QXLazycatProfilePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(QXLazycatProfileText()), 0o600)
 }
 
 func DiscoverFiles(args []string) []string {

@@ -125,6 +125,7 @@ func TestQXOutputPathUsesSourceNameWithQXSuffix(t *testing.T) {
 
 func TestFixQXFileSavesAsQXYAMLWithoutOverwritingSource(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("STASHFLOW_QX_PROFILES_DIR", filepath.Join(dir, "Profiles"))
 	source := filepath.Join(dir, "Starlink.conf")
 	original := strings.Join([]string{
 		"[server_local]",
@@ -147,6 +148,16 @@ func TestFixQXFileSavesAsQXYAMLWithoutOverwritingSource(t *testing.T) {
 	}
 	if result.BackupMade {
 		t.Fatalf("did not expect a backup when creating a new output file")
+	}
+	if !result.ProfileUpdated {
+		t.Fatalf("expected QX Lazycat profile to be updated")
+	}
+	profileData, err := os.ReadFile(filepath.Join(dir, "Profiles", "FILTER_LAZYCAT"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(profileData) != QXLazycatProfileText() {
+		t.Fatalf("unexpected QX Lazycat profile:\n%s", profileData)
 	}
 	sourceData, err := os.ReadFile(source)
 	if err != nil {
@@ -174,6 +185,7 @@ func TestFixQXFileSavesAsQXYAMLWithoutOverwritingSource(t *testing.T) {
 
 func TestFixQXFileBacksUpExistingOutput(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("STASHFLOW_QX_PROFILES_DIR", filepath.Join(dir, "Profiles"))
 	source := filepath.Join(dir, "Starlink.conf")
 	if err := os.WriteFile(source, []byte("[server_local]\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -196,5 +208,39 @@ func TestFixQXFileBacksUpExistingOutput(t *testing.T) {
 	}
 	if string(backupData) != "old output\n" {
 		t.Fatalf("expected backup to contain old output, got:\n%s", backupData)
+	}
+}
+
+func TestFixQXFileUpdatesProfileWhenOutputIsCurrent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("STASHFLOW_QX_PROFILES_DIR", filepath.Join(dir, "Profiles"))
+
+	source := filepath.Join(dir, "Starlink.conf")
+	if err := os.WriteFile(source, []byte("[general]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(dir, "Starlink-QX.yaml")
+	result := FixQXText("[general]\n", true)
+	if err := os.WriteFile(output, []byte(result.Text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, err := PreviewQXFile(source, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preview.Changed || preview.OutputChanged || !preview.ProfileChanged {
+		t.Fatalf("expected only profile to be changed, got changed=%v output=%v profile=%v", preview.Changed, preview.OutputChanged, preview.ProfileChanged)
+	}
+
+	fixed, err := FixQXFile(source, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fixed.OutputChanged {
+		t.Fatalf("did not expect QX output to be rewritten")
+	}
+	if !fixed.ProfileUpdated {
+		t.Fatalf("expected QX Lazycat profile to be updated")
 	}
 }

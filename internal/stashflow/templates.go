@@ -324,6 +324,14 @@ IP6-CIDR,2000::6666/128,direct,no-resolve
 IP6-CIDR,fc03:1136:3800::/40,direct,no-resolve
 `)
 
+var QXLazycatProfileLines = splitTemplate(`
+host-suffix, heiyu.space, direct
+host-suffix, lazycat.cloud, direct
+ip-cidr, 6.6.6.6/32, direct, no-resolve
+ip6-cidr, 2000::6666/128, direct, no-resolve
+ip6-cidr, fc03:1136:3800::/40, direct, no-resolve
+`)
+
 var QXRuleLines = append(QXLazycatRuleLines, qxRuleLinesFromStash(StashRuleLines)...)
 
 func splitTemplate(value string) []string {
