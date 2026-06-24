@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,30 +67,26 @@ var (
 )
 
 func main() {
-	var noBackup bool
-	var targetName string
-	flag.BoolVar(&noBackup, "no-backup", false, "写入前不创建 .bak 备份")
-	flag.StringVar(&targetName, "target", "stash", "处理目标：stash 或 qx")
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "用法: %s [选项] [配置文件 ...]\n\n", os.Args[0])
-		fmt.Fprintln(flag.CommandLine.Output(), "中文 TUI，用于清理 Stash 异常 UUID 或 QX 不支持的 hy2 节点，并补回分流规则。")
-		fmt.Fprintln(flag.CommandLine.Output(), "\n选项:")
-		flag.PrintDefaults()
+	args := os.Args[1:]
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		printUsage()
+		return
 	}
-	flag.Parse()
-
-	targetName = strings.ToLower(strings.TrimSpace(targetName))
-	if targetName != "stash" && targetName != "qx" {
-		fmt.Fprintf(os.Stderr, "不支持的 target: %s\n", targetName)
-		os.Exit(2)
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			fmt.Fprintf(os.Stderr, "不支持命令行参数: %s\n\n", arg)
+			printUsage()
+			os.Exit(2)
+		}
 	}
 
-	paths := stashflow.DiscoverFilesForTarget(flag.Args(), targetName)
+	targetName := "stash"
+	paths := stashflow.DiscoverFilesForTarget(args, targetName)
 	m := model{
-		args:    flag.Args(),
+		args:    args,
 		paths:   paths,
 		target:  targetName,
-		backup:  !noBackup,
+		backup:  true,
 		message: "已扫描订阅文件",
 	}
 	m.refresh()
@@ -101,6 +96,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "启动 TUI 失败: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func printUsage() {
+	fmt.Fprintf(os.Stdout, "用法: %s [配置文件 ...]\n\n", filepath.Base(os.Args[0]))
+	fmt.Fprintln(os.Stdout, "中文 TUI，用于清理 Stash 异常 UUID 或 QX 不支持的 hy2 节点，并补回分流规则。")
+	fmt.Fprintln(os.Stdout, "运行后在界面内按 t 切换 Stash/QX，按 Enter 或 A 保存。")
 }
 
 func (m model) Init() tea.Cmd {

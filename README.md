@@ -38,13 +38,7 @@ stashflow
 stashflow "Starlink.yaml"
 ```
 
-处理 Quantumult X 配置：
-
-```bash
-stashflow --target qx "QuantumultX.conf"
-```
-
-也可以直接运行 `stashflow` 后在 TUI 内按 `t` 在 Stash/QX 之间切换；切到 QX 后会重新扫描当前目录的 `.conf` 文件。
+运行 `stashflow` 后在 TUI 内按 `t` 在 Stash/QX 之间切换；切到 QX 后会重新扫描当前目录的 `.conf` 文件。
 
 QX 模式不会覆盖源文件，会保存为同目录下的 `源文件名-QX.yaml`，例如 `Starlink.conf` 会输出 `Starlink-QX.yaml`。如果同名输出文件已存在且备份开启，会先备份旧输出文件。
 
@@ -59,56 +53,6 @@ QX 模式不会覆盖源文件，会保存为同目录下的 `源文件名-QX.ya
 - `q`：退出
 
 修复时会先删除异常 UUID 节点和对应策略组引用，再补回内置分流分组和规则。
-
-## 批处理
-
-预览：
-
-```bash
-stashflow-clean --fix-all --dry-run "Starlink.yaml"
-```
-
-只清理异常 UUID：
-
-```bash
-stashflow-clean "Starlink.yaml"
-```
-
-清理异常 UUID 并补回分流规则：
-
-```bash
-stashflow-clean --fix-all "Starlink.yaml"
-```
-
-只补回分流规则：
-
-```bash
-stashflow-clean --apply-stash-rules "Starlink.yaml"
-```
-
-清理 QX 不支持的 hy2 节点：
-
-```bash
-stashflow-clean --target qx "QuantumultX.conf"
-```
-
-清理 QX hy2 节点并补回 QX 分流规则：
-
-```bash
-stashflow-clean --fix-qx "QuantumultX.conf"
-```
-
-只补回 QX 分流规则：
-
-```bash
-stashflow-clean --apply-qx-rules "QuantumultX.conf"
-```
-
-不创建备份：
-
-```bash
-stashflow-clean --fix-all --no-backup "Starlink.yaml"
-```
 
 ## 分流模板
 
@@ -136,7 +80,6 @@ stashflow-clean --fix-all --no-backup "Starlink.yaml"
 
 ```bash
 go run ./cmd/stashflow
-go run ./cmd/stashflow-clean --fix-all "Starlink.yaml"
 ```
 
 ## 许可证
